@@ -4,6 +4,7 @@
   </NuxtLayout>
 
   <NuxtLayout v-else-if="error?.statusCode === 401" name="public">
+    <!-- TODO: improve design of unauthorized error  -->
     <h1 class="text-3xl font-bold">{{ error }}</h1>
   </NuxtLayout>
 
