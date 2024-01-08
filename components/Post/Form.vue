@@ -270,11 +270,48 @@
       </div>
 
       <!-- Tags Input Field -->
-      <UForm :state="tagForm" class="mb-2.5 mt-5" @submit="handleAddTag">
-        <UFormGroup label="Tag" hint="(Opsional)" name="tag">
-          <UInput v-model="tagForm.tag" placeholder="Masukkan Tag" />
+      <!-- eslint-disable-next-line vue/max-attributes-per-line -->
+      <div class="mb-2.5 mt-5">
+        <UFormGroup label="Tag" name="tag" hint="(Opsional)">
+          <UInput
+            ref="tagInput"
+            v-model.trim="newTagForm.tag"
+            :loading="isTagLoading"
+            autocomplete="off"
+            autofill="off"
+            name="tag"
+            placeholder="Masukkan Tag"
+            @keyup.enter="handleAddTag"
+          />
         </UFormGroup>
-      </UForm>
+
+        <!-- Tag Suggestions -->
+        <UPopover
+          :open="!!newTagForm.tag && tagSuggestions.length > 0"
+          :popper="{
+            offsetDistance: -8,
+            adaptive: true,
+            scroll: true,
+          }"
+          :ui="{
+            wrapper: 'h-0',
+          }"
+        >
+          <div />
+          <template #panel>
+            <ul class="max-h-[150px] w-[336px] overflow-y-auto p-2">
+              <li v-for="suggestion in tagSuggestions" :key="suggestion">
+                <button
+                  class="w-full rounded-sm px-2 text-start font-lato text-sm leading-6 text-gray-800 hover:bg-gray-100"
+                  @click="selectTagSuggestion(suggestion)"
+                >
+                  {{ suggestion }}
+                </button>
+              </li>
+            </ul>
+          </template>
+        </UPopover>
+      </div>
 
       <ul
         class="flex min-h-[34px] w-full flex-wrap gap-1 rounded-lg border p-2"
@@ -287,7 +324,7 @@
           <span class="font-lato text-sm leading-none text-gray-600">
             {{ tag }}
           </span>
-          <button class="relative top-[1px] ml-2" @click="handleDeleteTag">
+          <button class="relative top-[1px] ml-2" @click="handleDeleteTag(tag)">
             <NuxtIcon
               name="common/close"
               aria-hidden="true"
@@ -374,7 +411,9 @@
   import { usePostStore } from '~/stores/post'
   import { validateImage } from '~/common/helpers/validation'
   import z from 'zod'
+  import debounce from 'lodash.debounce'
   import { ICategory } from '~/repository/j-site/types/category'
+  import { ITagRequestBody } from '~/repository/j-site/types/tag'
 
   const config = useRuntimeConfig()
   const siteStore = useSiteStore()
@@ -447,6 +486,10 @@
 
   const image = computed(() => {
     return postStore.form.image
+  })
+
+  const tags = computed(() => {
+    return postStore.form.tags
   })
 
   /* ------------------------- Image Handler, Upload and Delete ------------------------ */
@@ -577,7 +620,7 @@
     }
   }
 
-  /* ---------------------------- Category and Tags --------------------------- */
+  /* ---------------------------- Category --------------------------- */
 
   const isEditCategory = ref(false)
 
@@ -740,19 +783,99 @@
     fetchCategories()
   }
 
-  const tags: string[] = reactive([])
+  /* ---------------------------------- Tags ---------------------------------- */
+  const isTagLoading = ref(false)
 
-  const tagForm = reactive({
+  const newTagForm = reactive({
     tag: '',
   })
 
-  function handleAddTag() {
-    // TODO: store tag to API
-    tags.push(tagForm.tag)
-    tagForm.tag = ''
+  const tagInput = ref()
+
+  const tagSuggestions = ref<string[]>([])
+
+  async function handleAddTag() {
+    if (newTagForm.tag === '') return
+
+    isTagLoading.value = true
+
+    const formattedTag = newTagForm.tag.replaceAll(' ', '').toLowerCase()
+
+    const body: ITagRequestBody = {
+      name: formattedTag,
+    }
+
+    const { status, error } = await $jSiteApi.tag.createTag(
+      siteStore.siteId ?? '',
+      body,
+      { server: false },
+    )
+
+    if (status.value === 'success' && !tags.value?.includes(formattedTag)) {
+      postStore.pushTag(formattedTag)
+    }
+
+    if (status.value === 'error') {
+      console.error(error)
+    }
+
+    resetTagForm()
+    await nextTick()
+    focusTagInput()
   }
 
-  function handleDeleteTag() {
-    // TODO: handle delete tag
+  function resetTagForm() {
+    newTagForm.tag = ''
+    isTagLoading.value = false
+    tagSuggestions.value = []
   }
+
+  function focusTagInput() {
+    const element = document.querySelector(
+      `input[name="tag"]`,
+    ) as HTMLInputElement
+
+    element && element.focus()
+  }
+
+  function handleDeleteTag(tag: string) {
+    postStore.removeTag(tag)
+  }
+
+  const getSuggestions = debounce(async (tag: string) => {
+    const { data, status, error } = await $jSiteApi.tag.getTags(
+      siteStore.siteId ?? '',
+      { params: { q: tag } },
+      { server: false },
+    )
+
+    if (status.value === 'success') {
+      tagSuggestions.value = data.value?.data.map((item) => item.name) ?? []
+    }
+
+    if (status.value === 'error') {
+      console.error(error)
+      tagSuggestions.value = []
+    }
+  }, 500)
+
+  function selectTagSuggestion(tag: string) {
+    if (!tags.value?.includes(tag)) {
+      postStore.pushTag(tag)
+    }
+
+    resetTagForm()
+  }
+
+  watch(
+    () => newTagForm.tag,
+    (value) => {
+      if (value !== '') {
+        const formattedTag = newTagForm.tag.replaceAll(' ', '').toLowerCase()
+        getSuggestions(formattedTag)
+      } else {
+        tagSuggestions.value = []
+      }
+    },
+  )
 </script>
